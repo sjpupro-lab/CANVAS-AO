@@ -17,8 +17,9 @@ static int fs_find(const char *path) {
         if (fs_nodes[i].used) {
             int match = 1;
             for (int j = 0; j < 63; j++) {
+                /* Check null terminator first to avoid false negatives */
+                if (fs_nodes[i].name[j] == '\0' && path[j] == '\0') break;
                 if (fs_nodes[i].name[j] != path[j]) { match = 0; break; }
-                if (!path[j]) break;
             }
             if (match) return i;
         }

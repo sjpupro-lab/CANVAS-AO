@@ -76,7 +76,7 @@ static void bench_enwik8_run(const char *filename) {
         if (recovered) {
             int rec_size = compress_decompress(output, (size_t)compressed_size,
                                                recovered, input_size + 16);
-            int ok = (rec_size == (int)input_size) &&
+            int ok = (rec_size > 0) && ((size_t)rec_size == input_size) &&
                      (memcmp(input, recovered, input_size) == 0);
             printf("Round-trip     : %s\n", ok ? "OK" : "FAIL");
             free(recovered);

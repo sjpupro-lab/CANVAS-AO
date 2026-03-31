@@ -17,7 +17,7 @@ static uint8_t predict_next_byte(const uint8_t *ctx, int ctx_len) {
 
 int compress_predicted_delta(const uint8_t *input, size_t input_size,
                               uint8_t *output, size_t output_size) {
-    if (!input || !output || output_size < input_size + 8) return -1;
+    if (!input || !output || output_size < input_size + 4) return -1;
 
     uint8_t ctx[COMPRESS_CONTEXT_LEN];
     memset(ctx, 0, sizeof(ctx));

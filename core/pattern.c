@@ -23,7 +23,8 @@ static float layer_score_edge(int x, int y, int radius) {
         for (int dx = -radius; dx <= radius; dx++) {
             if (dx == 0 && dy == 0) continue;
             Cell n = canvas_get(x + dx, y + dy);
-            float d = (float)abs((int)center.energy - (int)n.energy);
+            int idiff = (int)center.energy - (int)n.energy;
+            float d = (float)(idiff < 0 ? -idiff : idiff);
             diff += d;
             cnt++;
         }
