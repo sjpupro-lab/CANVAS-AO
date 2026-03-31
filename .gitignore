@@ -1,0 +1,7 @@
+bin/bench_*
+bin/craft
+bin/dating
+bin/finance
+bin/terminal
+bin/test_core
+libao.so
