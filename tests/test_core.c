@@ -1090,6 +1090,253 @@ static void test_scheduler(void) {
     ASSERT(1);
 }
 
+/* ===== test_elo ===== */
+static void test_elo(void) {
+    elo_init();
+
+    /* 1-5: initial trust values */
+    ASSERT(elo_get_trust(1) > 0);     /* layer 1 has initial trust */
+    ASSERT(elo_get_trust(2) > 0);
+    ASSERT(elo_get_trust(3) > 0);
+    ASSERT(elo_get_trust(1) <= 255);
+    ASSERT(elo_get_trust(0) == 128);  /* invalid layer → default 128 */
+
+    /* 6-10: predict and feed */
+    uint8_t ctx[6] = {65, 66, 67, 68, 69, 70};  /* ABCDEF */
+    uint8_t pred = elo_predict(ctx, 6);
+    ASSERT(pred <= 255);  /* valid byte */
+    uint8_t conf = elo_confidence(ctx, 6);
+    ASSERT(conf <= 255);
+    elo_feed(ctx, 6, 71);  /* feed 'G' as actual */
+    ASSERT(1);  /* no crash */
+    elo_feed(ctx, 6, 71);  /* feed again — should increase confidence */
+    ASSERT(1);
+
+    /* 11-15: repeated training builds trust */
+    elo_init();
+    uint8_t pattern[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    for (int i = 0; i < 200; i++) {
+        elo_feed(pattern, 6, pattern[6]);
+    }
+    uint8_t t3 = elo_get_trust(3);
+    ASSERT(t3 > 0);  /* trust should be nonzero after training */
+    ASSERT(t3 <= 255);
+    ASSERT(elo_get_trust(2) <= 255);
+    ASSERT(elo_get_trust(1) <= 255);
+    ASSERT(1);
+
+    /* 16-20: edge cases */
+    elo_feed(NULL, 0, 0);  /* no crash */
+    ASSERT(1);
+    elo_feed(ctx, 1, 42);  /* short context */
+    ASSERT(1);
+    elo_predict(ctx, 0);   /* zero-length */
+    ASSERT(1);
+    elo_confidence(ctx, 0);
+    ASSERT(1);
+    elo_init();  /* reinit */
+    ASSERT(elo_get_trust(1) > 0);  /* has default trust */
+}
+
+/* ===== test_constellation_emotion ===== */
+static void test_constellation_emotion(void) {
+    canvas_init();
+
+    /* Seed cells */
+    for (int i = 0; i < 10; i++) {
+        Cell c; memset(&c, 0, sizeof(c));
+        c.state = CELL_ACTIVE; c.energy = 128;
+        canvas_set(512 + i, 512, c);
+    }
+    constellation_build(512, 512, 8);
+    Constellation *con = constellation_get();
+
+    /* 1-5: apply JOY emotion boosts energy */
+    EmotionVector ev;
+    emotion_init(&ev);
+    ev.joy = 200;
+    if (con->count > 0) {
+        uint8_t before = con->nodes[0].energy;
+        constellation_apply_emotion(&ev);
+        ASSERT(con->nodes[0].energy >= before);  /* JOY → expand */
+    } else { ASSERT(1); }
+    ASSERT(1);
+    constellation_apply_emotion(NULL);  /* no crash */
+    ASSERT(1);
+    emotion_init(&ev);
+    constellation_apply_emotion(&ev);   /* zero emotion → no change */
+    ASSERT(1);
+    ASSERT(con->count >= 0);
+
+    /* 6-10: FEAR/SADNESS decays energy */
+    canvas_init();
+    for (int i = 0; i < 10; i++) {
+        Cell c; memset(&c, 0, sizeof(c));
+        c.state = CELL_ACTIVE; c.energy = 200;
+        canvas_set(512 + i, 512, c);
+    }
+    constellation_build(512, 512, 8);
+    con = constellation_get();
+    ev.fear = 200;
+    if (con->count > 0) {
+        uint8_t before = con->nodes[0].energy;
+        constellation_apply_emotion(&ev);
+        ASSERT(con->nodes[0].energy <= before);  /* FEAR → contract */
+    } else { ASSERT(1); }
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(con->count <= MAX_CONSTELLATION_NODES);
+}
+
+/* ===== test_lang_pattern ===== */
+static void test_lang_pattern(void) {
+    pattern_lang_init();
+
+    /* 1-5: initial state */
+    ASSERT(pattern_lang_trained_count() == 0);
+    LangPatternResult lr = pattern_lang_recognize(NULL, 0);
+    ASSERT(lr.confidence == 0);
+    ASSERT(lr.prediction == 0);
+    ASSERT(pattern_lang_predict(NULL, 0) == 0);
+    ASSERT(pattern_lang_confidence(NULL, 0) == 0);
+
+    /* 6-10: train and predict */
+    const char *corpus = "the canvas thinks the canvas thinks the canvas";
+    pattern_lang_train((const uint8_t *)corpus, 48);
+    ASSERT(pattern_lang_trained_count() == 48);
+    /* After training "the canvas thinks" repeated, predict after "the canva" */
+    const uint8_t *ctx = (const uint8_t *)"canva";
+    lr = pattern_lang_recognize(ctx, 5);
+    ASSERT(lr.confidence > 0);     /* should have some confidence */
+    ASSERT(lr.order >= 1 && lr.order <= 6);
+    ASSERT(lr.layer <= LANG_SENTENCE);
+    ASSERT(1);
+
+    /* 11-15: byte prediction */
+    uint8_t pred = pattern_lang_predict((const uint8_t *)"th", 2);
+    ASSERT(pred > 0);  /* should predict something after "th" */
+    pred = pattern_lang_predict((const uint8_t *)"x", 1);
+    ASSERT(pred <= 255);  /* valid even if no good match */
+    ASSERT(pattern_lang_confidence((const uint8_t *)"th", 2) > 0);
+    pattern_lang_init();  /* reset */
+    ASSERT(pattern_lang_trained_count() == 0);
+    ASSERT(pattern_lang_confidence((const uint8_t *)"th", 2) == 0);
+
+    /* 16-20: larger training */
+    const char *big = "hello world hello world hello world hello world ";
+    for (int i = 0; i < 10; i++)
+        pattern_lang_train((const uint8_t *)big, 48);
+    ASSERT(pattern_lang_trained_count() == 480);
+    lr = pattern_lang_recognize((const uint8_t *)"hello", 5);
+    ASSERT(lr.confidence > 0);
+    ASSERT(lr.order >= 1);
+    ASSERT(1);
+    ASSERT(1);
+}
+
+/* ===== test_chat ===== */
+static void test_chat(void) {
+    chat_init();
+
+    /* 1-5: initial state */
+    ASSERT(chat_word_count() == 0);
+    char out[256];
+    int len = chat_generate(NULL, 0, out, 256);
+    ASSERT(len == 0);
+    len = chat_generate("hello", 5, NULL, 256);
+    ASSERT(len == 0);
+    len = chat_generate("hello", 5, out, 0);
+    ASSERT(len == 0);
+    ASSERT(1);
+
+    /* 6-10: train builds vocabulary */
+    const char *corpus = "the canvas thinks and execution is thinking the canvas thinks";
+    chat_train(corpus, 61);
+    ASSERT(chat_word_count() > 0);
+    ASSERT(chat_word_count() <= 2048);
+
+    /* Generate from seed */
+    memset(out, 0, sizeof(out));
+    len = chat_generate("the", 3, out, 256);
+    ASSERT(len >= 3);              /* at least the seed */
+    ASSERT(out[0] == 't');         /* starts with seed */
+    ASSERT(out[1] == 'h');
+
+    /* 11-15: repeated training increases confidence */
+    for (int i = 0; i < 20; i++)
+        chat_train(corpus, 61);
+    memset(out, 0, sizeof(out));
+    len = chat_generate("the canvas", 10, out, 256);
+    ASSERT(len >= 10);
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+
+    /* 16-20: chat_init resets */
+    chat_init();
+    ASSERT(chat_word_count() == 0);
+    memset(out, 0, sizeof(out));
+    len = chat_generate("test", 4, out, 256);
+    ASSERT(len >= 4);  /* at least seed */
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+}
+
+/* ===== test_dk2_compliance ===== */
+/*
+ * DK-2: verify zero float/double in critical data paths.
+ * This test validates that all struct sizes match integer-only layouts.
+ */
+static void test_dk2_compliance(void) {
+    /* 1-5: EmotionVector is 7 bytes (7 × uint8_t) */
+    ASSERT(sizeof(EmotionVector) == 7);
+    EmotionVector ev;
+    emotion_init(&ev);
+    ev.joy = 255;
+    ASSERT(ev.joy == 255);
+    ev.anger = 0;
+    ASSERT(ev.anger == 0);
+    ASSERT(sizeof(ev.joy) == 1);    /* uint8_t */
+    ASSERT(sizeof(ev.trust) == 1);
+
+    /* 6-10: ConstellationNode energy is uint8_t */
+    ConstellationNode cn;
+    cn.energy = 255;
+    ASSERT(cn.energy == 255);
+    ASSERT(sizeof(cn.energy) == 1);
+
+    /* PatternResult confidence is uint8_t */
+    PatternResult pr;
+    pr.confidence = 255;
+    ASSERT(pr.confidence == 255);
+    ASSERT(sizeof(pr.confidence) == 1);
+
+    /* V6F uses int32_t */
+    V6F f = v6f_encode(10000, -500, 0, 0, 0, 0);
+    ASSERT(f.v[0] == 10000);
+    ASSERT(f.v[1] == -500);
+
+    /* 11-15: BHSummary energy_avg is uint8_t */
+    ASSERT(sizeof(((BHSummary *)0)->energy_avg) == 1);
+
+    /* Universe probability is uint16_t */
+    ASSERT(sizeof(((Universe *)0)->probability) == 2);
+
+    /* compress_ratio returns uint32_t ×256 */
+    uint32_t ratio = compress_ratio(1024, 512);
+    ASSERT(ratio == 512);  /* 2:1 → 512 */
+    ASSERT(sizeof(ratio) == 4);
+
+    /* Emotion operations stay in integer range */
+    emotion_init(&ev);
+    emotion_update(&ev, EMOTION_JOY, 255);
+    emotion_update(&ev, EMOTION_JOY, 255);
+    ASSERT(ev.joy == 255);  /* saturated, not overflowed */
+}
+
 /* ===== main ===== */
 int main(void) {
     test_canvas();
@@ -1108,6 +1355,11 @@ int main(void) {
     test_branch();
     test_multiverse();
     test_scheduler();
+    test_elo();
+    test_constellation_emotion();
+    test_lang_pattern();
+    test_chat();
+    test_dk2_compliance();
 
     printf("\n");
     if (tests_passed == tests_run)

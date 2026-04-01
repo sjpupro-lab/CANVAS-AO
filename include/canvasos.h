@@ -160,7 +160,7 @@ void  scan_spiral(int cx, int cy, int max_radius, ScanCallback cb);
 int   scan_find_pattern(int cx, int cy, int max_r, uint8_t target_energy);
 int   scan_count_active(int cx, int cy, int radius);
 
-/* ===== pattern.c ===== */
+/* ===== pattern.c — spatial ===== */
 PatternResult pattern_recognize(int x, int y, int radius);
 void          pattern_layer_raw(int x, int y);
 void          pattern_layer_edge(int x, int y, int radius);
@@ -170,11 +170,37 @@ void          pattern_layer_context(int x, int y, int radius);
 void          pattern_layer_abstract(int x, int y, int radius);
 void          pattern_train(int x, int y, PatternLayer layer, uint16_t id);
 
+/* ===== pattern.c — n-gram language layers ===== */
+/* Language pattern layers (6-order, maps to n-gram 1-6) */
+typedef enum {
+    LANG_BYTE     = 0,  /* order 1: single byte */
+    LANG_MORPHEME = 1,  /* order 2: byte pair */
+    LANG_WORD     = 2,  /* order 3: short context */
+    LANG_PHRASE   = 3,  /* order 4: medium context */
+    LANG_CLAUSE   = 4,  /* order 5: long context */
+    LANG_SENTENCE = 5   /* order 6: full sentence */
+} LangLayer;
+
+typedef struct {
+    LangLayer layer;
+    uint8_t   prediction;   /* predicted next byte */
+    uint8_t   confidence;   /* 0-255 */
+    int       order;        /* best matching n-gram order (1-6) */
+} LangPatternResult;
+
+void              pattern_lang_init(void);
+void              pattern_lang_train(const uint8_t *data, size_t len);
+LangPatternResult pattern_lang_recognize(const uint8_t *ctx, int ctx_len);
+uint8_t           pattern_lang_predict(const uint8_t *ctx, int ctx_len);
+uint8_t           pattern_lang_confidence(const uint8_t *ctx, int ctx_len);
+int               pattern_lang_trained_count(void);
+
 /* ===== constellation.c ===== */
 void  constellation_build(int cx, int cy, int radius);
 void  constellation_propagate(int steps);
 int   constellation_infer(uint8_t query_energy);
 void  constellation_update(int x, int y, int16_t delta);
+void  constellation_apply_emotion(EmotionVector *ev);
 
 /* ===== emotion.c ===== */
 void          emotion_init(EmotionVector *ev);
@@ -182,6 +208,12 @@ void          emotion_update(EmotionVector *ev, EmotionIndex stimulus, uint8_t i
 EmotionVector emotion_blend(EmotionVector a, EmotionVector b, uint8_t ratio);
 EmotionIndex  emotion_dominant(EmotionVector *ev);
 uint8_t       emotion_to_energy(EmotionVector *ev);
+
+/* ===== chat.c — 2-stage text generation ===== */
+void  chat_init(void);
+void  chat_train(const char *text, int text_len);
+int   chat_generate(const char *seed, int seed_len, char *output, int max_len);
+int   chat_word_count(void);
 
 /* ===== stream.c ===== */
 int    stream_write_keyframe(const uint8_t *data, size_t size);

@@ -95,6 +95,64 @@ void constellation_update(int x, int y, int16_t delta) {
     }
 }
 
+/*
+ * Apply emotion to constellation: dominant emotion boosts node energy,
+ * overall emotion intensity drives propagation strength.
+ *
+ * Strategy:
+ *   1. Compute emotion energy (average of 7 fields) → base boost
+ *   2. Dominant emotion index selects boost pattern:
+ *      - JOY/TRUST/SURPRISE: boost all nodes (expansive)
+ *      - FEAR/SADNESS: decay all nodes (contractive)
+ *      - ANGER: boost center, decay periphery (focused)
+ *      - DISGUST: decay center, boost periphery (repulsive)
+ *   3. Boost = emotion_energy / 8 (0-31 range, subtle per-call)
+ */
+void constellation_apply_emotion(EmotionVector *ev) {
+    if (!ev || g_const.count == 0) return;
+
+    uint8_t e = emotion_to_energy(ev);
+    if (e == 0) return;
+
+    EmotionIndex dom = emotion_dominant(ev);
+    int16_t boost = (int16_t)(e >> 3);  /* 0-31 */
+    if (boost == 0) boost = 1;
+
+    for (int i = 0; i < g_const.count; i++) {
+        int16_t delta;
+        int dx = g_const.nodes[i].x - g_const.center_x;
+        int dy = g_const.nodes[i].y - g_const.center_y;
+        int dist_sq = dx * dx + dy * dy;
+        int is_center = (dist_sq <= 4);
+
+        switch (dom) {
+        case EMOTION_JOY:
+        case EMOTION_TRUST:
+        case EMOTION_SURPRISE:
+            delta = boost;                          /* expand all */
+            break;
+        case EMOTION_FEAR:
+        case EMOTION_SADNESS:
+            delta = (int16_t)(-boost);              /* contract all */
+            break;
+        case EMOTION_ANGER:
+            delta = is_center ? boost : (int16_t)(-boost / 2);  /* focus center */
+            break;
+        case EMOTION_DISGUST:
+            delta = is_center ? (int16_t)(-boost) : (int16_t)(boost / 2);  /* repel center */
+            break;
+        default:
+            delta = 0;
+            break;
+        }
+
+        int16_t val = (int16_t)g_const.nodes[i].energy + delta;
+        if (val < 0)   val = 0;
+        if (val > 255) val = 255;
+        g_const.nodes[i].energy = (uint8_t)val;
+    }
+}
+
 Constellation *constellation_get(void) {
     return &g_const;
 }
