@@ -191,6 +191,13 @@ int    stream_reconstruct(int frame_id, uint8_t *out, size_t out_size);
 int    stream_frame_count(void);
 void   stream_reset(void);
 
+/* ===== elo.c ===== */
+void    elo_init(void);
+uint8_t elo_predict(const uint8_t *ctx, int ctx_len);
+uint8_t elo_confidence(const uint8_t *ctx, int ctx_len);
+void    elo_feed(const uint8_t *ctx, int ctx_len, uint8_t actual);
+uint8_t elo_get_trust(int layer);
+
 /* ===== compress.c ===== */
 int   compress_predicted_delta(const uint8_t *input, size_t input_size,
                                 uint8_t *output, size_t output_size);

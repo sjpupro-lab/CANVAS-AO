@@ -4,7 +4,7 @@ LDFLAGS = -lm
 
 CORE_SRCS = core/canvas.c core/gate.c core/scan.c core/pattern.c \
             core/constellation.c core/emotion.c core/stream.c \
-            core/compress.c core/v6f.c core/wh.c core/bh.c \
+            core/compress.c core/elo.c core/v6f.c core/wh.c core/bh.c \
             core/merge.c core/lane.c core/branch.c core/multiverse.c \
             core/scheduler.c core/fs.c
 
