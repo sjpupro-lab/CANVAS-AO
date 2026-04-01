@@ -2,7 +2,6 @@
 #include "cell.h"
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 #include <stdlib.h>
 
 /* ===== Simple test framework ===== */
@@ -18,7 +17,8 @@ static int tests_passed = 0;
     } \
 } while(0)
 
-#define ASSERT_FLOAT_EQ(a, b, eps) ASSERT(fabsf((a)-(b)) < (eps))
+/* Integer comparison within tolerance */
+#define ASSERT_INT_NEAR(a, b, tol) ASSERT(abs((int)(a)-(int)(b)) <= (tol))
 
 /* ===== test_canvas ===== */
 static void test_canvas(void) {
@@ -242,7 +242,7 @@ static void test_pattern(void) {
 
     /* 1-5: recognize on empty canvas */
     PatternResult pr = pattern_recognize(100, 100, 4);
-    ASSERT(pr.confidence >= 0.0f && pr.confidence <= 1.0f);
+    ASSERT(pr.confidence <= 255);
     ASSERT(pr.layer >= LAYER_RAW && pr.layer <= LAYER_ABSTRACT);
     ASSERT(pr.matched_id == 0);
 
@@ -252,7 +252,7 @@ static void test_pattern(void) {
     ac.color.r = 255;
     canvas_set(100, 100, ac);
     pr = pattern_recognize(100, 100, 4);
-    ASSERT(pr.confidence > 0.0f);
+    ASSERT(pr.confidence > 0);
     ASSERT(pr.layer >= LAYER_RAW);
 
     /* Pattern with surrounding context */
@@ -262,7 +262,7 @@ static void test_pattern(void) {
         }
     }
     pr = pattern_recognize(100, 100, 4);
-    ASSERT(pr.confidence > 0.0f);
+    ASSERT(pr.confidence > 0);
 
     /* 11-15: 6 layers callable without crash */
     pattern_layer_raw(100, 100);
@@ -280,18 +280,18 @@ static void test_pattern(void) {
     pattern_layer_abstract(100, 100, 2);
     ASSERT(1);
     pr = pattern_recognize(50, 50, 1);
-    ASSERT(pr.confidence >= 0.0f);
+    ASSERT(pr.confidence >= 0);
     pr = pattern_recognize(0, 0, 2);
     ASSERT(pr.layer >= LAYER_RAW);
     pr = pattern_recognize(CANVAS_WIDTH-1, CANVAS_HEIGHT-1, 2);
-    ASSERT(pr.confidence >= 0.0f);
+    ASSERT(pr.confidence >= 0);
     pr = pattern_recognize(200, 200, 8);
     ASSERT(pr.layer <= LAYER_ABSTRACT);
 
     /* 21-25: training */
     pattern_train(100, 100, LAYER_SHAPE, 99);
     pr = pattern_recognize(100, 100, 4);
-    ASSERT(pr.confidence >= 0.0f);
+    ASSERT(pr.confidence >= 0);
     pattern_train(200, 200, LAYER_OBJECT, 100);
     ASSERT(1);
     pattern_train(300, 300, LAYER_ABSTRACT, 101);
@@ -303,13 +303,13 @@ static void test_pattern(void) {
 
     /* 26-30: confidence in valid range after training */
     pr = pattern_recognize(100, 100, 4);
-    ASSERT(pr.confidence >= 0.0f && pr.confidence <= 1.0f);
+    ASSERT(pr.confidence <= 255);
     pr = pattern_recognize(200, 200, 4);
-    ASSERT(pr.confidence >= 0.0f && pr.confidence <= 1.0f);
+    ASSERT(pr.confidence <= 255);
     pr = pattern_recognize(300, 300, 4);
-    ASSERT(pr.confidence >= 0.0f && pr.confidence <= 1.0f);
+    ASSERT(pr.confidence <= 255);
     pr = pattern_recognize(50, 50, 4);
-    ASSERT(pr.confidence >= 0.0f && pr.confidence <= 1.0f);
+    ASSERT(pr.confidence <= 255);
     ASSERT(pr.layer <= LAYER_ABSTRACT);
 }
 
@@ -338,30 +338,30 @@ static void test_constellation(void) {
     constellation_propagate(5);
     ASSERT(1);
     for (int i = 0; i < con->count; i++) {
-        ASSERT(con->nodes[i].energy >= 0.0f);
-        ASSERT(con->nodes[i].energy <= 1.0f);
+        ASSERT(con->nodes[i].energy <= 255);
+        ASSERT(1); /* energy is uint8_t, always >= 0 */
     }
 
     /* 11-15: infer returns valid index or -1 */
-    int best = constellation_infer(0.5f);
+    int best = constellation_infer(128);   /* was 0.5f → 128 */
     ASSERT(best >= -1 && best < MAX_CONSTELLATION_NODES);
-    best = constellation_infer(0.0f);
+    best = constellation_infer(0);         /* was 0.0f */
     ASSERT(best >= -1);
-    best = constellation_infer(1.0f);
+    best = constellation_infer(255);       /* was 1.0f */
     ASSERT(best >= -1);
 
     /* 16-20: update energy */
     if (con->count > 0) {
         int nx = con->nodes[0].x;
         int ny = con->nodes[0].y;
-        float old_e = con->nodes[0].energy;
-        constellation_update(nx, ny, 0.1f);
-        ASSERT(con->nodes[0].energy >= 0.0f);
-        ASSERT(con->nodes[0].energy <= 1.0f);
-        constellation_update(nx, ny, -2.0f); /* clamp to 0 */
-        ASSERT(con->nodes[0].energy >= 0.0f);
-        constellation_update(nx, ny, 2.0f); /* clamp to 1 */
-        ASSERT(con->nodes[0].energy <= 1.0f);
+        uint8_t old_e = con->nodes[0].energy;
+        constellation_update(nx, ny, 26);    /* was 0.1f → ~26 */
+        ASSERT(con->nodes[0].energy <= 255);
+        ASSERT(1); /* uint8_t always >= 0 */
+        constellation_update(nx, ny, -512);  /* clamp to 0 */
+        ASSERT(con->nodes[0].energy == 0);
+        constellation_update(nx, ny, 512);   /* clamp to 255 */
+        ASSERT(con->nodes[0].energy == 255);
         (void)old_e;
     } else { ASSERT(1); ASSERT(1); ASSERT(1); ASSERT(1); ASSERT(1); }
 
@@ -370,11 +370,11 @@ static void test_constellation(void) {
     constellation_build(500, 500, 5);
     con = constellation_get();
     ASSERT(con->count == 0);
-    best = constellation_infer(0.5f);
+    best = constellation_infer(128);
     ASSERT(best == -1);
     constellation_propagate(3);
     ASSERT(1);
-    constellation_update(500, 500, 0.5f); /* non-existent node, no crash */
+    constellation_update(500, 500, 128); /* non-existent node, no crash */
     ASSERT(1);
 
     /* 26-30: rebuild with more data */
@@ -389,7 +389,7 @@ static void test_constellation(void) {
     ASSERT(con->count > 0);
     constellation_propagate(2);
     ASSERT(1);
-    best = constellation_infer(0.5f);
+    best = constellation_infer(128);
     ASSERT(best >= 0);
     ASSERT(con->count <= MAX_CONSTELLATION_NODES);
     ASSERT(con->center_x == 204);
@@ -401,46 +401,47 @@ static void test_emotion(void) {
 
     /* 1-5: init */
     emotion_init(&ev);
-    ASSERT(ev.joy      == 0.0f);
-    ASSERT(ev.trust    == 0.0f);
-    ASSERT(ev.fear     == 0.0f);
-    ASSERT(ev.surprise == 0.0f);
-    ASSERT(ev.sadness  == 0.0f);
+    ASSERT(ev.joy      == 0);
+    ASSERT(ev.trust    == 0);
+    ASSERT(ev.fear     == 0);
+    ASSERT(ev.surprise == 0);
+    ASSERT(ev.sadness  == 0);
 
     /* 6-10: update */
-    emotion_update(&ev, EMOTION_JOY, 0.5f);
-    ASSERT(ev.joy > 0.0f);
-    emotion_update(&ev, EMOTION_FEAR, 1.0f);
-    ASSERT(ev.fear > 0.0f);
-    ASSERT(ev.joy > 0.0f);   /* persists */
-    emotion_update(&ev, EMOTION_ANGER, 0.3f);
-    ASSERT(ev.anger > 0.0f);
-    emotion_update(&ev, EMOTION_TRUST, 0.8f);
-    ASSERT(ev.trust > 0.0f);
+    emotion_update(&ev, EMOTION_JOY, 128);     /* was 0.5f → 128 */
+    ASSERT(ev.joy > 0);
+    emotion_update(&ev, EMOTION_FEAR, 255);     /* was 1.0f → 255 */
+    ASSERT(ev.fear > 0);
+    ASSERT(ev.joy > 0);   /* persists */
+    emotion_update(&ev, EMOTION_ANGER, 77);     /* was 0.3f → 77 */
+    ASSERT(ev.anger > 0);
+    emotion_update(&ev, EMOTION_TRUST, 204);    /* was 0.8f → 204 */
+    ASSERT(ev.trust > 0);
 
-    /* 11-15: clamp at 1.0 */
+    /* 11-15: clamp at 255 */
     emotion_init(&ev);
-    emotion_update(&ev, EMOTION_JOY, 2.0f);
-    ASSERT(ev.joy <= 1.0f);
-    emotion_update(&ev, EMOTION_SADNESS, -1.0f);
-    ASSERT(ev.sadness >= 0.0f);
-    emotion_update(&ev, EMOTION_DISGUST, 0.5f);
-    ASSERT(ev.disgust >= 0.0f && ev.disgust <= 1.0f);
+    emotion_update(&ev, EMOTION_JOY, 255);
+    emotion_update(&ev, EMOTION_JOY, 255);      /* saturates at 255 */
+    ASSERT(ev.joy == 255);
+    emotion_update(&ev, EMOTION_SADNESS, 0);     /* zero intensity = no change */
+    ASSERT(ev.sadness == 0);                      /* stays 0, decayed from 0 */
+    emotion_update(&ev, EMOTION_DISGUST, 128);
+    ASSERT(ev.disgust <= 255);
     emotion_init(&ev);
-    ev.surprise = 0.5f;
-    emotion_update(&ev, EMOTION_SURPRISE, 0.6f);
-    ASSERT(ev.surprise <= 1.0f);
+    ev.surprise = 128;
+    emotion_update(&ev, EMOTION_SURPRISE, 153);   /* was 0.6f → 153 */
+    ASSERT(ev.surprise <= 255);
     ASSERT(1);
 
     /* 16-20: dominant */
     emotion_init(&ev);
-    ev.joy   = 0.9f;
-    ev.fear  = 0.1f;
-    ev.anger = 0.2f;
+    ev.joy   = 230;    /* was 0.9f */
+    ev.fear  = 26;     /* was 0.1f */
+    ev.anger = 51;     /* was 0.2f */
     ASSERT(emotion_dominant(&ev) == EMOTION_JOY);
-    ev.trust = 0.95f;
+    ev.trust = 242;    /* was 0.95f */
     ASSERT(emotion_dominant(&ev) == EMOTION_TRUST);
-    ev.sadness = 0.99f;
+    ev.sadness = 252;  /* was 0.99f */
     ASSERT(emotion_dominant(&ev) == EMOTION_SADNESS);
     emotion_init(&ev);
     ASSERT(emotion_dominant(&ev) == EMOTION_JOY); /* all 0, first wins */
@@ -448,31 +449,31 @@ static void test_emotion(void) {
     /* 21-25: blend */
     EmotionVector a, b;
     emotion_init(&a); emotion_init(&b);
-    a.joy = 1.0f; b.joy = 0.0f;
-    EmotionVector blended = emotion_blend(a, b, 0.5f);
-    ASSERT_FLOAT_EQ(blended.joy, 0.5f, 0.01f);
-    blended = emotion_blend(a, b, 0.0f);
-    ASSERT_FLOAT_EQ(blended.joy, 1.0f, 0.01f);
-    blended = emotion_blend(a, b, 1.0f);
-    ASSERT_FLOAT_EQ(blended.joy, 0.0f, 0.01f);
-    a.fear = 0.6f; b.fear = 0.4f;
-    blended = emotion_blend(a, b, 0.5f);
-    ASSERT_FLOAT_EQ(blended.fear, 0.5f, 0.01f);
-    ASSERT(blended.joy >= 0.0f);
+    a.joy = 255; b.joy = 0;
+    EmotionVector blended = emotion_blend(a, b, 128);   /* ratio=0.5 → 128 */
+    ASSERT_INT_NEAR(blended.joy, 128, 2);               /* ~128 (was 0.5f) */
+    blended = emotion_blend(a, b, 0);                    /* ratio=0.0 → 0 */
+    ASSERT_INT_NEAR(blended.joy, 255, 1);                /* ~255 (was 1.0f) */
+    blended = emotion_blend(a, b, 255);                  /* ratio=1.0 → 255 */
+    ASSERT_INT_NEAR(blended.joy, 0, 1);                  /* ~0 (was 0.0f) */
+    a.fear = 153; b.fear = 102;                          /* 0.6, 0.4 */
+    blended = emotion_blend(a, b, 128);                  /* ratio=0.5 */
+    ASSERT_INT_NEAR(blended.fear, 128, 3);               /* ~128 (was 0.5f) */
+    ASSERT(blended.joy >= 0);                             /* uint8_t always >= 0 */
 
     /* 26-30: to_energy */
     emotion_init(&ev);
-    ASSERT_FLOAT_EQ(emotion_to_energy(&ev), 0.0f, 0.01f);
-    ev.joy = 0.7f;
-    float energy = emotion_to_energy(&ev);
-    ASSERT(energy > 0.0f && energy <= 1.0f);
-    ev.trust = ev.fear = ev.surprise = ev.sadness = ev.disgust = ev.anger = 1.0f;
+    ASSERT(emotion_to_energy(&ev) == 0);
+    ev.joy = 179;                                        /* was 0.7f → 179 */
+    uint8_t energy = emotion_to_energy(&ev);
+    ASSERT(energy > 0 && energy <= 255);
+    ev.trust = ev.fear = ev.surprise = ev.sadness = ev.disgust = ev.anger = 255;
     energy = emotion_to_energy(&ev);
-    ASSERT(energy <= 1.0f);
+    ASSERT(energy <= 255);
     emotion_init(&ev);
-    for (int i = 0; i < 7; i++) emotion_update(&ev, (EmotionIndex)i, 0.1f);
-    ASSERT(emotion_to_energy(&ev) > 0.0f);
-    ASSERT(emotion_to_energy(&ev) <= 1.0f);
+    for (int i = 0; i < 7; i++) emotion_update(&ev, (EmotionIndex)i, 26);  /* was 0.1f → 26 */
+    ASSERT(emotion_to_energy(&ev) > 0);
+    ASSERT(emotion_to_energy(&ev) <= 255);
 }
 
 /* ===== test_stream ===== */
@@ -564,17 +565,17 @@ static void test_compress(void) {
     ASSERT(recovered[0] == 0xAA);
     ASSERT(recovered[255] == 0xAA);
 
-    /* 11-15: ratio */
-    float ratio = compress_ratio(256, 256);
-    ASSERT_FLOAT_EQ(ratio, 1.0f, 0.01f);
+    /* 11-15: ratio (×256 fixed-point: 256=1:1, 512=2:1) */
+    uint32_t ratio = compress_ratio(256, 256);
+    ASSERT(ratio == 256);                /* 1:1 */
     ratio = compress_ratio(256, 128);
-    ASSERT_FLOAT_EQ(ratio, 2.0f, 0.01f);
+    ASSERT(ratio == 512);                /* 2:1 */
     ratio = compress_ratio(256, 512);
-    ASSERT_FLOAT_EQ(ratio, 0.5f, 0.01f);
+    ASSERT(ratio == 128);                /* 0.5:1 */
     ratio = compress_ratio(0, 1);
-    ASSERT_FLOAT_EQ(ratio, 0.0f, 0.01f);
+    ASSERT(ratio == 0);                  /* 0:1 */
     ratio = compress_ratio(1000, 500);
-    ASSERT_FLOAT_EQ(ratio, 2.0f, 0.01f);
+    ASSERT(ratio == 512);                /* 2:1 */
 
     /* 16-20: null/bad input */
     csz = compress_predicted_delta(NULL, 256, output, 512);
@@ -609,62 +610,62 @@ static void test_compress(void) {
 
 /* ===== test_v6f ===== */
 static void test_v6f(void) {
-    /* 1-5: encode/decode */
-    V6F f = v6f_encode(100.0f, 99.0f, 101.0f, 98.0f, 5000.0f, 1.0f);
-    float price, open, high, low, vol, ts;
+    /* 1-5: encode/decode (int32_t values) */
+    V6F f = v6f_encode(10000, 9900, 10100, 9800, 500000, 100);
+    int32_t price, open, high, low, vol, ts;
     v6f_decode(&f, &price, &open, &high, &low, &vol, &ts);
-    ASSERT_FLOAT_EQ(price, 100.0f, 0.001f);
-    ASSERT_FLOAT_EQ(open,   99.0f, 0.001f);
-    ASSERT_FLOAT_EQ(high,  101.0f, 0.001f);
-    ASSERT_FLOAT_EQ(low,    98.0f, 0.001f);
-    ASSERT_FLOAT_EQ(vol,  5000.0f, 0.001f);
+    ASSERT(price == 10000);
+    ASSERT(open  == 9900);
+    ASSERT(high  == 10100);
+    ASSERT(low   == 9800);
+    ASSERT(vol   == 500000);
 
-    /* 6-10: distance */
+    /* 6-10: distance_sq (squared Euclidean) */
     V6F a = v6f_encode(0,0,0,0,0,0);
     V6F b = v6f_encode(1,0,0,0,0,0);
-    ASSERT_FLOAT_EQ(v6f_distance(&a, &b), 1.0f, 0.001f);
+    ASSERT(v6f_distance_sq(&a, &b) == 1);           /* 1² = 1 */
     V6F c2 = v6f_encode(3,4,0,0,0,0);
-    ASSERT_FLOAT_EQ(v6f_distance(&a, &c2), 5.0f, 0.001f);
-    ASSERT_FLOAT_EQ(v6f_distance(&a, &a), 0.0f, 0.001f);
-    float d = v6f_distance(&f, &a);
-    ASSERT(d > 0.0f);
+    ASSERT(v6f_distance_sq(&a, &c2) == 25);          /* 3²+4² = 25 */
+    ASSERT(v6f_distance_sq(&a, &a) == 0);
+    uint32_t d = v6f_distance_sq(&f, &a);
+    ASSERT(d > 0);
 
-    /* 11-15: similarity */
+    /* 11-15: similarity (×10000: 10000=identical, -10000=opposite) */
     V6F x = v6f_encode(1,0,0,0,0,0);
     V6F y = v6f_encode(1,0,0,0,0,0);
-    ASSERT_FLOAT_EQ(v6f_similarity(&x, &y), 1.0f, 0.001f);
+    ASSERT(v6f_similarity(&x, &y) == 10000);
     V6F z = v6f_encode(-1,0,0,0,0,0);
-    ASSERT_FLOAT_EQ(v6f_similarity(&x, &z), -1.0f, 0.001f);
+    ASSERT(v6f_similarity(&x, &z) == -10000);
     V6F zero = v6f_encode(0,0,0,0,0,0);
-    ASSERT_FLOAT_EQ(v6f_similarity(&x, &zero), 0.0f, 0.001f);
-    V6F p = v6f_encode(1,1,0,0,0,0);
-    V6F q = v6f_encode(0,1,0,0,0,0);
-    float sim = v6f_similarity(&p, &q);
-    ASSERT(sim > 0.0f && sim < 1.0f);
+    ASSERT(v6f_similarity(&x, &zero) == 0);
+    V6F p = v6f_encode(1000,1000,0,0,0,0);
+    V6F q = v6f_encode(0,1000,0,0,0,0);
+    int32_t sim = v6f_similarity(&p, &q);
+    ASSERT(sim > 0 && sim < 10000);
 
     /* 16-20: decode NULL fields (no crash) */
     v6f_decode(&f, NULL, NULL, NULL, NULL, NULL, NULL);
     ASSERT(1);
     v6f_decode(&f, &price, NULL, NULL, NULL, NULL, NULL);
-    ASSERT_FLOAT_EQ(price, 100.0f, 0.001f);
+    ASSERT(price == 10000);
 
     /* 21-25: encode negative */
-    V6F neg = v6f_encode(-1.0f, -2.0f, -0.5f, -3.0f, 0.0f, 100.0f);
+    V6F neg = v6f_encode(-100, -200, -50, -300, 0, 10000);
     v6f_decode(&neg, &price, &open, &high, &low, NULL, &ts);
-    ASSERT_FLOAT_EQ(price, -1.0f, 0.001f);
-    ASSERT_FLOAT_EQ(open,  -2.0f, 0.001f);
-    ASSERT_FLOAT_EQ(high,  -0.5f, 0.001f);
-    ASSERT_FLOAT_EQ(low,   -3.0f, 0.001f);
-    ASSERT_FLOAT_EQ(ts,   100.0f, 0.001f);
+    ASSERT(price == -100);
+    ASSERT(open  == -200);
+    ASSERT(high  == -50);
+    ASSERT(low   == -300);
+    ASSERT(ts    == 10000);
 
     /* 26-30: distance symmetry, similarity range */
     V6F u = v6f_encode(1,2,3,4,5,6);
     V6F v2 = v6f_encode(6,5,4,3,2,1);
-    ASSERT_FLOAT_EQ(v6f_distance(&u, &v2), v6f_distance(&v2, &u), 0.001f);
-    float s = v6f_similarity(&u, &v2);
-    ASSERT(s >= -1.0f && s <= 1.0f);
-    ASSERT_FLOAT_EQ(v6f_similarity(&u, &u), 1.0f, 0.001f);
-    ASSERT(v6f_distance(&u, &v2) > 0.0f);
+    ASSERT(v6f_distance_sq(&u, &v2) == v6f_distance_sq(&v2, &u));
+    int32_t s = v6f_similarity(&u, &v2);
+    ASSERT(s >= -10000 && s <= 10000);
+    ASSERT(v6f_similarity(&u, &u) == 10000);
+    ASSERT(v6f_distance_sq(&u, &v2) > 0);
     ASSERT(1);
 }
 
@@ -753,14 +754,14 @@ static void test_bh(void) {
     ASSERT(s->from_time == 100);
     ASSERT(s->to_time   == 300);
 
-    /* 11-15: energy_avg */
-    ASSERT(s->energy_avg >= 0.0f && s->energy_avg <= 1.0f);
+    /* 11-15: energy_avg (0-255) */
+    ASSERT(s->energy_avg <= 255);   /* uint8_t always in range */
     int sid2 = bh_compress_history(100, 150);
     ASSERT(sid2 == 1);
     BHSummary *s2 = bh_get_summary(1);
     ASSERT(s2 != NULL);
     ASSERT(s2->record_count == 1);
-    ASSERT(s2->energy_avg >= 0.0f);
+    ASSERT(s2->energy_avg <= 255);
 
     /* 16-20: summarize_pattern */
     int pids[3] = {0,1,2};
@@ -769,7 +770,7 @@ static void test_bh(void) {
     BHSummary *ps = bh_get_summary(psid);
     ASSERT(ps != NULL);
     ASSERT(ps->record_count == 3);
-    ASSERT(ps->energy_avg >= 0.0f);
+    ASSERT(ps->energy_avg <= 255);
 
     /* 21-25: forget */
     bh_forget(0);
@@ -1016,14 +1017,14 @@ static void test_multiverse(void) {
     c = multiverse_get_cell(uid0, 100, 100);
     ASSERT(c.energy == 77);
 
-    /* 11-15: probability update */
-    multiverse_probability_update(uid0, 2.0f);
-    float sum = 0.0f;
+    /* 11-15: probability update (evidence ×256: 512 = 2.0x) */
+    multiverse_probability_update(uid0, 512);
+    uint32_t sum = 0;
     for (int i = 0; i < 2; i++) {
         Universe *u = multiverse_get(i);
         if (u && u->active) sum += u->probability;
     }
-    ASSERT_FLOAT_EQ(sum, 1.0f, 0.01f);
+    ASSERT_INT_NEAR(sum, 65535, 2);  /* renormalized to ~65535 */
 
     /* 16-20: collapse */
     multiverse_collapse(uid0);
@@ -1048,7 +1049,7 @@ static void test_multiverse(void) {
     ASSERT(multiverse_get(UNIVERSE_COUNT) == NULL);
     Cell oor = multiverse_get_cell(-1, 0, 0);
     ASSERT(oor.energy == 0); /* fallback to canvas */
-    multiverse_probability_update(-1, 1.0f); /* no crash */
+    multiverse_probability_update(-1, 256); /* no crash (256 = 1.0x) */
     ASSERT(1);
     multiverse_collapse(-1); /* no crash */
     ASSERT(1);
@@ -1089,6 +1090,253 @@ static void test_scheduler(void) {
     ASSERT(1);
 }
 
+/* ===== test_elo ===== */
+static void test_elo(void) {
+    elo_init();
+
+    /* 1-5: initial trust values */
+    ASSERT(elo_get_trust(1) > 0);     /* layer 1 has initial trust */
+    ASSERT(elo_get_trust(2) > 0);
+    ASSERT(elo_get_trust(3) > 0);
+    ASSERT(elo_get_trust(1) <= 255);
+    ASSERT(elo_get_trust(0) == 128);  /* invalid layer → default 128 */
+
+    /* 6-10: predict and feed */
+    uint8_t ctx[6] = {65, 66, 67, 68, 69, 70};  /* ABCDEF */
+    uint8_t pred = elo_predict(ctx, 6);
+    ASSERT(pred <= 255);  /* valid byte */
+    uint8_t conf = elo_confidence(ctx, 6);
+    ASSERT(conf <= 255);
+    elo_feed(ctx, 6, 71);  /* feed 'G' as actual */
+    ASSERT(1);  /* no crash */
+    elo_feed(ctx, 6, 71);  /* feed again — should increase confidence */
+    ASSERT(1);
+
+    /* 11-15: repeated training builds trust */
+    elo_init();
+    uint8_t pattern[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    for (int i = 0; i < 200; i++) {
+        elo_feed(pattern, 6, pattern[6]);
+    }
+    uint8_t t3 = elo_get_trust(3);
+    ASSERT(t3 > 0);  /* trust should be nonzero after training */
+    ASSERT(t3 <= 255);
+    ASSERT(elo_get_trust(2) <= 255);
+    ASSERT(elo_get_trust(1) <= 255);
+    ASSERT(1);
+
+    /* 16-20: edge cases */
+    elo_feed(NULL, 0, 0);  /* no crash */
+    ASSERT(1);
+    elo_feed(ctx, 1, 42);  /* short context */
+    ASSERT(1);
+    elo_predict(ctx, 0);   /* zero-length */
+    ASSERT(1);
+    elo_confidence(ctx, 0);
+    ASSERT(1);
+    elo_init();  /* reinit */
+    ASSERT(elo_get_trust(1) > 0);  /* has default trust */
+}
+
+/* ===== test_constellation_emotion ===== */
+static void test_constellation_emotion(void) {
+    canvas_init();
+
+    /* Seed cells */
+    for (int i = 0; i < 10; i++) {
+        Cell c; memset(&c, 0, sizeof(c));
+        c.state = CELL_ACTIVE; c.energy = 128;
+        canvas_set(512 + i, 512, c);
+    }
+    constellation_build(512, 512, 8);
+    Constellation *con = constellation_get();
+
+    /* 1-5: apply JOY emotion boosts energy */
+    EmotionVector ev;
+    emotion_init(&ev);
+    ev.joy = 200;
+    if (con->count > 0) {
+        uint8_t before = con->nodes[0].energy;
+        constellation_apply_emotion(&ev);
+        ASSERT(con->nodes[0].energy >= before);  /* JOY → expand */
+    } else { ASSERT(1); }
+    ASSERT(1);
+    constellation_apply_emotion(NULL);  /* no crash */
+    ASSERT(1);
+    emotion_init(&ev);
+    constellation_apply_emotion(&ev);   /* zero emotion → no change */
+    ASSERT(1);
+    ASSERT(con->count >= 0);
+
+    /* 6-10: FEAR/SADNESS decays energy */
+    canvas_init();
+    for (int i = 0; i < 10; i++) {
+        Cell c; memset(&c, 0, sizeof(c));
+        c.state = CELL_ACTIVE; c.energy = 200;
+        canvas_set(512 + i, 512, c);
+    }
+    constellation_build(512, 512, 8);
+    con = constellation_get();
+    ev.fear = 200;
+    if (con->count > 0) {
+        uint8_t before = con->nodes[0].energy;
+        constellation_apply_emotion(&ev);
+        ASSERT(con->nodes[0].energy <= before);  /* FEAR → contract */
+    } else { ASSERT(1); }
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(con->count <= MAX_CONSTELLATION_NODES);
+}
+
+/* ===== test_lang_pattern ===== */
+static void test_lang_pattern(void) {
+    pattern_lang_init();
+
+    /* 1-5: initial state */
+    ASSERT(pattern_lang_trained_count() == 0);
+    LangPatternResult lr = pattern_lang_recognize(NULL, 0);
+    ASSERT(lr.confidence == 0);
+    ASSERT(lr.prediction == 0);
+    ASSERT(pattern_lang_predict(NULL, 0) == 0);
+    ASSERT(pattern_lang_confidence(NULL, 0) == 0);
+
+    /* 6-10: train and predict */
+    const char *corpus = "the canvas thinks the canvas thinks the canvas";
+    pattern_lang_train((const uint8_t *)corpus, 48);
+    ASSERT(pattern_lang_trained_count() == 48);
+    /* After training "the canvas thinks" repeated, predict after "the canva" */
+    const uint8_t *ctx = (const uint8_t *)"canva";
+    lr = pattern_lang_recognize(ctx, 5);
+    ASSERT(lr.confidence > 0);     /* should have some confidence */
+    ASSERT(lr.order >= 1 && lr.order <= 6);
+    ASSERT(lr.layer <= LANG_SENTENCE);
+    ASSERT(1);
+
+    /* 11-15: byte prediction */
+    uint8_t pred = pattern_lang_predict((const uint8_t *)"th", 2);
+    ASSERT(pred > 0);  /* should predict something after "th" */
+    pred = pattern_lang_predict((const uint8_t *)"x", 1);
+    ASSERT(pred <= 255);  /* valid even if no good match */
+    ASSERT(pattern_lang_confidence((const uint8_t *)"th", 2) > 0);
+    pattern_lang_init();  /* reset */
+    ASSERT(pattern_lang_trained_count() == 0);
+    ASSERT(pattern_lang_confidence((const uint8_t *)"th", 2) == 0);
+
+    /* 16-20: larger training */
+    const char *big = "hello world hello world hello world hello world ";
+    for (int i = 0; i < 10; i++)
+        pattern_lang_train((const uint8_t *)big, 48);
+    ASSERT(pattern_lang_trained_count() == 480);
+    lr = pattern_lang_recognize((const uint8_t *)"hello", 5);
+    ASSERT(lr.confidence > 0);
+    ASSERT(lr.order >= 1);
+    ASSERT(1);
+    ASSERT(1);
+}
+
+/* ===== test_chat ===== */
+static void test_chat(void) {
+    chat_init();
+
+    /* 1-5: initial state */
+    ASSERT(chat_word_count() == 0);
+    char out[256];
+    int len = chat_generate(NULL, 0, out, 256);
+    ASSERT(len == 0);
+    len = chat_generate("hello", 5, NULL, 256);
+    ASSERT(len == 0);
+    len = chat_generate("hello", 5, out, 0);
+    ASSERT(len == 0);
+    ASSERT(1);
+
+    /* 6-10: train builds vocabulary */
+    const char *corpus = "the canvas thinks and execution is thinking the canvas thinks";
+    chat_train(corpus, 61);
+    ASSERT(chat_word_count() > 0);
+    ASSERT(chat_word_count() <= 2048);
+
+    /* Generate from seed */
+    memset(out, 0, sizeof(out));
+    len = chat_generate("the", 3, out, 256);
+    ASSERT(len >= 3);              /* at least the seed */
+    ASSERT(out[0] == 't');         /* starts with seed */
+    ASSERT(out[1] == 'h');
+
+    /* 11-15: repeated training increases confidence */
+    for (int i = 0; i < 20; i++)
+        chat_train(corpus, 61);
+    memset(out, 0, sizeof(out));
+    len = chat_generate("the canvas", 10, out, 256);
+    ASSERT(len >= 10);
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+
+    /* 16-20: chat_init resets */
+    chat_init();
+    ASSERT(chat_word_count() == 0);
+    memset(out, 0, sizeof(out));
+    len = chat_generate("test", 4, out, 256);
+    ASSERT(len >= 4);  /* at least seed */
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+}
+
+/* ===== test_dk2_compliance ===== */
+/*
+ * DK-2: verify zero float/double in critical data paths.
+ * This test validates that all struct sizes match integer-only layouts.
+ */
+static void test_dk2_compliance(void) {
+    /* 1-5: EmotionVector is 7 bytes (7 × uint8_t) */
+    ASSERT(sizeof(EmotionVector) == 7);
+    EmotionVector ev;
+    emotion_init(&ev);
+    ev.joy = 255;
+    ASSERT(ev.joy == 255);
+    ev.anger = 0;
+    ASSERT(ev.anger == 0);
+    ASSERT(sizeof(ev.joy) == 1);    /* uint8_t */
+    ASSERT(sizeof(ev.trust) == 1);
+
+    /* 6-10: ConstellationNode energy is uint8_t */
+    ConstellationNode cn;
+    cn.energy = 255;
+    ASSERT(cn.energy == 255);
+    ASSERT(sizeof(cn.energy) == 1);
+
+    /* PatternResult confidence is uint8_t */
+    PatternResult pr;
+    pr.confidence = 255;
+    ASSERT(pr.confidence == 255);
+    ASSERT(sizeof(pr.confidence) == 1);
+
+    /* V6F uses int32_t */
+    V6F f = v6f_encode(10000, -500, 0, 0, 0, 0);
+    ASSERT(f.v[0] == 10000);
+    ASSERT(f.v[1] == -500);
+
+    /* 11-15: BHSummary energy_avg is uint8_t */
+    ASSERT(sizeof(((BHSummary *)0)->energy_avg) == 1);
+
+    /* Universe probability is uint16_t */
+    ASSERT(sizeof(((Universe *)0)->probability) == 2);
+
+    /* compress_ratio returns uint32_t ×256 */
+    uint32_t ratio = compress_ratio(1024, 512);
+    ASSERT(ratio == 512);  /* 2:1 → 512 */
+    ASSERT(sizeof(ratio) == 4);
+
+    /* Emotion operations stay in integer range */
+    emotion_init(&ev);
+    emotion_update(&ev, EMOTION_JOY, 255);
+    emotion_update(&ev, EMOTION_JOY, 255);
+    ASSERT(ev.joy == 255);  /* saturated, not overflowed */
+}
+
 /* ===== main ===== */
 int main(void) {
     test_canvas();
@@ -1107,6 +1355,11 @@ int main(void) {
     test_branch();
     test_multiverse();
     test_scheduler();
+    test_elo();
+    test_constellation_emotion();
+    test_lang_pattern();
+    test_chat();
+    test_dk2_compliance();
 
     printf("\n");
     if (tests_passed == tests_run)

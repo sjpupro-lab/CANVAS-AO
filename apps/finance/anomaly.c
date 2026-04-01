@@ -1,36 +1,66 @@
+/*
+ * anomaly.c — Anomaly detection, integer-only (DK-2)
+ *
+ * Z-score computed in fixed-point ×256.
+ * Anomaly score: uint8_t 0-255 (sigmoid approximation via lookup).
+ */
+
 #include "canvasos.h"
 #include "cell.h"
 #include <stdio.h>
-#include <math.h>
 #include <string.h>
 
 typedef struct {
-    int   index;
-    float score;
-    int   is_anomaly;
+    int     index;
+    uint8_t score;    /* 0-255 anomaly score */
+    int     is_anomaly;
 } AnomalyResult;
 
-/* Compute mean for normalization */
-static float compute_mean(const V6F *data, int count, int field) {
-    float sum = 0.0f;
-    for (int i = 0; i < count; i++) sum += data[i].v[field];
-    return count > 0 ? sum / count : 0.0f;
+/* Integer sqrt via Newton's method */
+static uint32_t isqrt(uint32_t n) {
+    if (n == 0) return 0;
+    uint32_t x = n, y = (x + 1) >> 1;
+    while (y < x) { x = y; y = (x + n / x) >> 1; }
+    return x;
 }
 
-static float compute_std(const V6F *data, int count, int field, float mean) {
-    float var = 0.0f;
+/* Compute mean of a V6F field */
+static int32_t compute_mean(const V6F *data, int count, int field) {
+    if (count <= 0) return 0;
+    int64_t sum = 0;
+    for (int i = 0; i < count; i++) sum += data[i].v[field];
+    return (int32_t)(sum / count);
+}
+
+/* Compute std deviation ×256 (fixed-point) */
+static uint32_t compute_std_fp(const V6F *data, int count, int field, int32_t mean) {
+    if (count <= 0) return 256;  /* default 1.0 in ×256 */
+    int64_t var = 0;
     for (int i = 0; i < count; i++) {
-        float d = data[i].v[field] - mean;
+        int64_t d = data[i].v[field] - mean;
         var += d * d;
     }
-    return count > 0 ? sqrtf(var / count) : 1.0f;
+    var /= count;
+    /* std = sqrt(var), return std × 256 */
+    uint32_t std_int = isqrt((uint32_t)(var > 0xFFFFFFFF ? 0xFFFFFFFF : var));
+    return std_int > 0 ? std_int * 256 : 256;
 }
 
-float anomaly_score(const V6F *vec, float mean_price, float std_price) {
-    if (std_price < 1e-6f) return 0.0f;
-    float z = fabsf(vec->v[0] - mean_price) / std_price;
-    /* Sigmoid transform: maps z-score to [0,1] */
-    return 1.0f / (1.0f + expf(-0.5f * (z - 3.0f)));
+/*
+ * Anomaly score: integer sigmoid approximation.
+ * z = |price - mean| * 256 / std  (×256 fixed-point z-score)
+ * Score: piecewise linear sigmoid around z=768 (z-score=3.0):
+ *   z < 512 → 0, z 512-1024 → linear 0-255, z > 1024 → 255
+ */
+static uint8_t anomaly_score(const V6F *vec, int32_t mean_price, uint32_t std_fp) {
+    if (std_fp == 0) return 0;
+    int32_t diff = vec->v[0] - mean_price;
+    if (diff < 0) diff = -diff;
+    uint32_t z = ((uint32_t)diff * 256) / (std_fp / 256);  /* z in ×256 */
+
+    if (z < 512) return 0;       /* z-score < 2.0 → no anomaly */
+    if (z > 1024) return 255;    /* z-score > 4.0 → definite anomaly */
+    return (uint8_t)((z - 512) * 255 / 512);
 }
 
 int anomaly_detect(const V6F *data, int count, AnomalyResult *results) {
@@ -40,28 +70,31 @@ int anomaly_detect(const V6F *data, int count, AnomalyResult *results) {
     emotion_init(&market_sentiment);
     constellation_build(2048, 2048, 16);
 
-    float mean = compute_mean(data, count, 0);
-    float std  = compute_std(data, count, 0, mean);
-    if (std < 1e-6f) std = 1.0f;
+    int32_t  mean   = compute_mean(data, count, 0);
+    uint32_t std_fp = compute_std_fp(data, count, 0, mean);
 
     int anomaly_count = 0;
     for (int i = 0; i < count; i++) {
-        float score = anomaly_score(&data[i], mean, std);
+        uint8_t score = anomaly_score(&data[i], mean, std_fp);
         results[i].index      = i;
         results[i].score      = score;
-        results[i].is_anomaly = (score > 0.5f) ? 1 : 0;
+        results[i].is_anomaly = (score > 128) ? 1 : 0;
 
         /* Update market sentiment based on anomaly */
         if (results[i].is_anomaly) {
-            emotion_update(&market_sentiment, EMOTION_FEAR, score * 0.3f);
-            emotion_update(&market_sentiment, EMOTION_SURPRISE, score * 0.2f);
+            /* fear intensity ≈ score * 0.3 → score * 77 / 256 */
+            uint8_t fear_i = (uint8_t)(((uint16_t)score * 77 + 128) >> 8);
+            uint8_t surp_i = (uint8_t)(((uint16_t)score * 51 + 128) >> 8);
+            emotion_update(&market_sentiment, EMOTION_FEAR, fear_i);
+            emotion_update(&market_sentiment, EMOTION_SURPRISE, surp_i);
             anomaly_count++;
         } else {
-            emotion_update(&market_sentiment, EMOTION_TRUST, 0.05f);
+            emotion_update(&market_sentiment, EMOTION_TRUST, 13); /* ~0.05 */
         }
 
-        /* Update constellation energy */
-        constellation_update(2048 + i % 32, 2048 + i / 32, score * 0.1f);
+        /* Update constellation energy: delta ≈ score / 40 */
+        int16_t delta = (int16_t)(score / 40);
+        constellation_update(2048 + i % 32, 2048 + i / 32, delta);
     }
     return anomaly_count;
 }
@@ -71,7 +104,7 @@ void anomaly_print_report(const AnomalyResult *results, int count) {
     int total_anomalies = 0;
     for (int i = 0; i < count; i++) {
         if (results[i].is_anomaly) {
-            printf("  [%3d] ANOMALY  score=%.4f\n", results[i].index, results[i].score);
+            printf("  [%3d] ANOMALY  score=%d/255\n", results[i].index, results[i].score);
             total_anomalies++;
         }
     }

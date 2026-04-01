@@ -1,12 +1,18 @@
 /*
- * compress.c — A/O Pipeline Compression Executor
+ * compress.c — A/O Pipeline Compression Executor + ELO Cascade
  *
- * This is NOT a standalone algorithm. It orchestrates the full A/O pipeline:
- *   input → n-gram prediction (canvas energy) → correction collection (WH)
- *         → history compression (BH) → stream serialization
+ * Pipeline:
+ *   input → ELO trust-weighted n-gram prediction → canvas energy mapping
+ *         → correction collection (WH) → history compression (BH)
+ *         → stream metadata → format-optimized output
  *
- * Compression quality = prediction accuracy (n-gram model)
- * Compression ratio  = correction_count / input_size
+ * ELO integration:
+ *   Layer 3 (100x) trust → weights n-gram orders 1-2
+ *   Layer 2 (10x)  trust → weights n-gram orders 3-4
+ *   Layer 1 (1x)   trust → weights n-gram orders 5-6
+ *
+ *   Cascade: fast layer accuracy → slow layer trust boost.
+ *   "The second hand's pattern becomes the minute hand's value."
  *
  * Output format (auto-selected):
  *   FORMAT_CORRECTIONS (0x01): [4B size][1B tag][4B count][corrections...]
@@ -43,26 +49,6 @@ static void ngram_reset(void) {
 }
 
 /*
- * Predict next byte: highest weighted confidence across all orders.
- * Weight = order * count, so higher-order matches dominate when confident.
- */
-static uint8_t ngram_predict(const uint8_t *ctx, int ctx_len) {
-    uint8_t  best   = 0;
-    uint32_t best_w = 0;
-
-    for (int order = 1; order <= NGRAM_MAX_ORDER; order++) {
-        if (ctx_len < order) break;
-        uint32_t h = fnv1a(ctx + ctx_len - order, order);
-        uint32_t w = (uint32_t)order * ngram_conf[order - 1][h];
-        if (w > best_w) {
-            best_w = w;
-            best   = ngram_pred[order - 1][h];
-        }
-    }
-    return best;
-}
-
-/*
  * Train: update all applicable order tables.
  * Correct prediction → confidence++.
  * Wrong prediction → confidence-- (replace when exhausted).
@@ -84,6 +70,67 @@ static void ngram_train(const uint8_t *ctx, int ctx_len, uint8_t actual) {
             }
         }
     }
+}
+
+/* ===== Combined Prediction: N-gram + ELO Trust Cascade ===== */
+
+/*
+ * ELO trust scores modulate n-gram order weights:
+ *   - Layer 3 trust → orders 1-2 (local byte patterns)
+ *   - Layer 2 trust → orders 3-4 (phrase patterns)
+ *   - Layer 1 trust → orders 5-6 (document patterns)
+ *
+ * weight = trust[layer] * ngram_conf[order]
+ *
+ * When cascade detects fast layer is accurate, it boosts slow layer trust.
+ * This adapts prediction to the actual data structure — no static bias.
+ */
+static uint8_t combined_predict(const uint8_t *ctx, int ctx_len) {
+    uint8_t trust[3];
+    trust[0] = elo_get_trust(3);   /* orders 1-2 */
+    trust[1] = elo_get_trust(2);   /* orders 3-4 */
+    trust[2] = elo_get_trust(1);   /* orders 5-6 */
+
+    uint8_t  best   = 0;
+    uint32_t best_w = 0;
+
+    for (int order = 1; order <= NGRAM_MAX_ORDER; order++) {
+        if (ctx_len < order) break;
+
+        int layer_idx = (order - 1) / 2;  /* 0,0,1,1,2,2 */
+
+        uint32_t h = fnv1a(ctx + ctx_len - order, order);
+        /*
+         * weight = order * trust * conf
+         *
+         * Baseline: order gives static preference to longer contexts.
+         * Cascade:  trust adapts dynamically based on layer accuracy.
+         *
+         * At initial trust=128 for all: weight ∝ order*conf (same as static).
+         * After cascade: trust diverges, reweighting order importance.
+         * e.g. L3 trust=200 → short context boosted
+         *      L1 trust=100 → long context dampened
+         */
+        uint32_t w = (uint32_t)order * trust[layer_idx] * ngram_conf[order - 1][h];
+        if (w > best_w) {
+            best_w = w;
+            best   = ngram_pred[order - 1][h];
+        }
+    }
+
+    return best;
+}
+
+/* Train both n-gram and ELO cascade */
+static void combined_train(const uint8_t *ctx, int ctx_len, uint8_t actual) {
+    ngram_train(ctx, ctx_len, actual);
+    elo_feed(ctx, ctx_len, actual);
+}
+
+/* Reset both prediction engines */
+static void combined_reset(void) {
+    ngram_reset();
+    elo_init();
 }
 
 /* Map byte context to canvas cell: energy += 1, G channel = last byte */
@@ -119,8 +166,8 @@ int compress_predicted_delta(const uint8_t *input, size_t input_size,
     /* XOR delta worst case: 5-byte header + input_size deltas */
     if (output_size < input_size + 5) return -1;
 
-    /* 1. Reset A/O pipeline state for this compression run */
-    ngram_reset();
+    /* 1. Reset A/O pipeline state */
+    combined_reset();
     wh_init();
 
     uint8_t ctx[NGRAM_MAX_ORDER];
@@ -134,14 +181,14 @@ int compress_predicted_delta(const uint8_t *input, size_t input_size,
     uint32_t correction_count = 0;
 
     for (size_t i = 0; i < input_size; i++) {
-        uint8_t predicted = ngram_predict(ctx, ctx_len);
+        uint8_t predicted = combined_predict(ctx, ctx_len);
         uint8_t actual    = input[i];
 
         deltas[i] = actual ^ predicted;
 
         if (predicted != actual) {
             correction_count++;
-            /* WH: record correction event (position + bytes) */
+            /* WH: record correction event */
             uint8_t wh_meta[5];
             wh_meta[0] = (uint8_t)((i >> 16) & 0xFF);
             wh_meta[1] = (uint8_t)((i >> 8)  & 0xFF);
@@ -151,8 +198,8 @@ int compress_predicted_delta(const uint8_t *input, size_t input_size,
             wh_record((uint64_t)i, wh_meta, 5);
         }
 
-        /* Train n-gram model with actual byte */
-        ngram_train(ctx, ctx_len, actual);
+        /* Train n-gram + ELO cascade */
+        combined_train(ctx, ctx_len, actual);
 
         /* Feed canvas: energy tracking on byte-mapped cells */
         canvas_feed_byte(ctx, ctx_len, actual);
@@ -190,7 +237,7 @@ int compress_predicted_delta(const uint8_t *input, size_t input_size,
          * Corrections format: only mispredicted bytes are stored.
          * Re-run identical prediction to emit corrections deterministically.
          */
-        ngram_reset();
+        combined_reset();
         memset(ctx, 0, sizeof(ctx));
         ctx_len = 0;
 
@@ -213,7 +260,7 @@ int compress_predicted_delta(const uint8_t *input, size_t input_size,
 
         /* Emit corrections: [3B position][1B actual_value] */
         for (size_t i = 0; i < input_size; i++) {
-            uint8_t predicted = ngram_predict(ctx, ctx_len);
+            uint8_t predicted = combined_predict(ctx, ctx_len);
             uint8_t actual    = input[i];
 
             if (predicted != actual) {
@@ -223,7 +270,7 @@ int compress_predicted_delta(const uint8_t *input, size_t input_size,
                 output[pos++] = actual;
             }
 
-            ngram_train(ctx, ctx_len, actual);
+            combined_train(ctx, ctx_len, actual);
             ctx_push(ctx, &ctx_len, actual);
         }
 
@@ -250,20 +297,20 @@ int compress_decompress(const uint8_t *input, size_t input_size,
 
     uint8_t format = input[4];
 
-    ngram_reset();
+    combined_reset();
     uint8_t ctx[NGRAM_MAX_ORDER];
     memset(ctx, 0, sizeof(ctx));
     int ctx_len = 0;
 
     if (format == FORMAT_XOR_DELTA) {
-        /* XOR delta: replay n-gram prediction, XOR with deltas */
+        /* XOR delta: replay trust-weighted prediction, XOR with deltas */
         size_t out_pos = 0;
         for (size_t i = 5; i < input_size && out_pos < orig_size; i++) {
-            uint8_t predicted = ngram_predict(ctx, ctx_len);
+            uint8_t predicted = combined_predict(ctx, ctx_len);
             uint8_t byte      = input[i] ^ predicted;
             output[out_pos++] = byte;
 
-            ngram_train(ctx, ctx_len, byte);
+            combined_train(ctx, ctx_len, byte);
             ctx_push(ctx, &ctx_len, byte);
         }
         return (int)out_pos;
@@ -277,7 +324,6 @@ int compress_decompress(const uint8_t *input, size_t input_size,
                               ((uint32_t)input[7] << 8)  |
                                (uint32_t)input[8];
 
-        /* Walk corrections sequentially (they are position-ordered) */
         size_t   corr_off = 9;
         uint32_t corr_idx = 0;
 
@@ -292,7 +338,7 @@ int compress_decompress(const uint8_t *input, size_t input_size,
 
         size_t out_pos = 0;
         for (size_t i = 0; i < orig_size; i++) {
-            uint8_t predicted = ngram_predict(ctx, ctx_len);
+            uint8_t predicted = combined_predict(ctx, ctx_len);
             uint8_t actual;
 
             if ((uint32_t)i == next_pos) {
@@ -312,7 +358,7 @@ int compress_decompress(const uint8_t *input, size_t input_size,
             }
 
             output[out_pos++] = actual;
-            ngram_train(ctx, ctx_len, actual);
+            combined_train(ctx, ctx_len, actual);
             ctx_push(ctx, &ctx_len, actual);
         }
         return (int)out_pos;
@@ -321,7 +367,11 @@ int compress_decompress(const uint8_t *input, size_t input_size,
     return -1; /* Unknown format */
 }
 
-float compress_ratio(size_t original_size, size_t compressed_size) {
-    if (compressed_size == 0) return 0.0f;
-    return (float)original_size / (float)compressed_size;
+/*
+ * Compression ratio × 256 (fixed-point).
+ * 256 = 1:1, 512 = 2:1, 1280 = 5:1, etc.
+ */
+uint32_t compress_ratio(size_t original_size, size_t compressed_size) {
+    if (compressed_size == 0) return 0;
+    return (uint32_t)((original_size * 256) / compressed_size);
 }

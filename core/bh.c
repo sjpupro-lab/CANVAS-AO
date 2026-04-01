@@ -1,3 +1,9 @@
+/*
+ * bh.c — BlackHole: history compression, integer-only (DK-2)
+ *
+ * energy_avg: uint8_t 0-255 (average of metadata[0] proxy energies).
+ */
+
 #include "canvasos.h"
 #include "cell.h"
 #include <string.h>
@@ -21,22 +27,22 @@ int bh_compress_history(uint64_t from_time, uint64_t to_time) {
     s->from_time    = from_time;
     s->to_time      = to_time;
     s->record_count = 0;
-    s->energy_avg   = 0.0f;
+    s->energy_avg   = 0;
 
     /* Summarize WH records in range */
     int cnt = wh_count();
-    float energy_sum = 0.0f;
-    int   in_range   = 0;
+    uint32_t energy_sum = 0;
+    int      in_range   = 0;
     for (int i = 0; i < cnt; i++) {
         WHRecord *r = wh_get(i);
         if (r && r->timestamp >= from_time && r->timestamp <= to_time) {
             in_range++;
-            /* Use metadata[0] as proxy energy */
-            energy_sum += r->metadata[0] / 255.0f;
+            /* Use metadata[0] as proxy energy (already 0-255) */
+            energy_sum += r->metadata[0];
         }
     }
     s->record_count = in_range;
-    s->energy_avg   = in_range > 0 ? energy_sum / in_range : 0.0f;
+    s->energy_avg   = in_range > 0 ? (uint8_t)(energy_sum / (uint32_t)in_range) : 0;
 
     return bh_summary_count++;
 }
@@ -61,7 +67,7 @@ int bh_summarize_pattern(const int *pattern_ids, int count) {
     s->from_time    = 0;
     s->to_time      = 0;
     s->record_count = count;
-    s->energy_avg   = 0.5f;
+    s->energy_avg   = 128;  /* 0.5 equivalent */
     (void)pattern_ids;
     return bh_summary_count++;
 }

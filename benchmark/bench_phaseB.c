@@ -31,7 +31,7 @@ int main(void) {
         int x = (i * 41) % CANVAS_WIDTH;
         int y = (i * 37) % CANVAS_HEIGHT;
         PatternResult pr = pattern_recognize(x, y, BENCH_RADIUS);
-        if (pr.confidence > 0.0f) recognized++;
+        if (pr.confidence > 0) recognized++;
     }
 
     clock_t end = clock();
