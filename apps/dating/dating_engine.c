@@ -1,14 +1,18 @@
+/*
+ * dating_engine.c — Dating AI response engine, integer-only (DK-2)
+ */
+
 #include "canvasos.h"
 #include "cell.h"
 #include <string.h>
 #include <stdio.h>
 
 /* Forward declarations from persona.c */
-void         persona_load(const char *name);
-void         persona_update_affection(float delta);
-int          persona_get_response_style(void);
-float        persona_get_affection(void);
-const char  *persona_get_name(void);
+void           persona_load(const char *name);
+void           persona_update_affection(uint8_t delta);
+int            persona_get_response_style(void);
+uint8_t        persona_get_affection(void);
+const char    *persona_get_name(void);
 
 static EmotionVector dating_emotion;
 static int           dating_ready = 0;
@@ -42,7 +46,8 @@ const char *dating_respond(const char *input) {
     int len = 0;
     while (input[len]) len++;
 
-    float intensity = (len > 20) ? 0.3f : 0.1f;
+    /* intensity: 77 (~0.3) for long input, 26 (~0.1) for short */
+    uint8_t intensity = (len > 20) ? 77 : 26;
     EmotionIndex stim = EMOTION_JOY;
 
     /* Simple keyword detection */
@@ -52,7 +57,8 @@ const char *dating_respond(const char *input) {
     }
 
     emotion_update(&dating_emotion, stim, intensity);
-    persona_update_affection(intensity * 0.1f);
+    /* affection delta: intensity / 10 ≈ 3 or 8 */
+    persona_update_affection((uint8_t)(intensity / 10));
 
     /* Record interaction */
     wh_record((uint64_t)len, (const uint8_t *)input,

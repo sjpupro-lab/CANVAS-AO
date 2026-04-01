@@ -9,7 +9,7 @@
 
 typedef struct {
     const char *name;
-    float       ratio;
+    uint32_t    ratio;      /* ×256 fixed-point */
     double      speed_mb;
 } PhaseResult;
 
@@ -18,7 +18,7 @@ static PhaseResult bench_one(const char *name, const uint8_t *data, size_t size)
     r.name = name;
 
     uint8_t *out = (uint8_t *)malloc(size + size / 4 + 16);
-    if (!out) { r.ratio = 0; r.speed_mb = 0; return r; }
+    if (!out) { r.ratio = 0; r.speed_mb = 0.0; return r; }
 
     clock_t t0 = clock();
     int csz = compress_predicted_delta(data, size, out, size + size / 4 + 16);
@@ -29,7 +29,7 @@ static PhaseResult bench_one(const char *name, const uint8_t *data, size_t size)
         double elapsed = (double)(t1 - t0) / CLOCKS_PER_SEC;
         r.speed_mb = elapsed > 0 ? (size / 1e6) / elapsed : 0.0;
     } else {
-        r.ratio    = 0.0f;
+        r.ratio    = 0;
         r.speed_mb = 0.0;
     }
     free(out);
@@ -64,7 +64,7 @@ int main(void) {
     printf("%-16s  %8s  %12s\n", "----", "-----", "-----------");
     for (int i = 0; i < 3; i++) {
         printf("%-16s  %8.3f  %12.2f\n",
-               results[i].name, results[i].ratio, results[i].speed_mb);
+               results[i].name, results[i].ratio / 256.0, results[i].speed_mb);
     }
     printf("=== Phase D DONE ===\n");
     free(data);

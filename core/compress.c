@@ -367,7 +367,11 @@ int compress_decompress(const uint8_t *input, size_t input_size,
     return -1; /* Unknown format */
 }
 
-float compress_ratio(size_t original_size, size_t compressed_size) {
-    if (compressed_size == 0) return 0.0f;
-    return (float)original_size / (float)compressed_size;
+/*
+ * Compression ratio × 256 (fixed-point).
+ * 256 = 1:1, 512 = 2:1, 1280 = 5:1, etc.
+ */
+uint32_t compress_ratio(size_t original_size, size_t compressed_size) {
+    if (compressed_size == 0) return 0;
+    return (uint32_t)((original_size * 256) / compressed_size);
 }

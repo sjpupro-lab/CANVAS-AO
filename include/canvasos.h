@@ -69,35 +69,35 @@ typedef enum {
     EMOTION_ANGER    = 6
 } EmotionIndex;
 
-/* 7D emotion vector */
+/* 7D emotion vector — integer-only (DK-2), 0-255 scale */
 typedef struct {
-    float joy;
-    float trust;
-    float fear;
-    float surprise;
-    float sadness;
-    float disgust;
-    float anger;
+    uint8_t joy;
+    uint8_t trust;
+    uint8_t fear;
+    uint8_t surprise;
+    uint8_t sadness;
+    uint8_t disgust;
+    uint8_t anger;
 } EmotionVector;
 
-/* Constellation node */
+/* Constellation node — energy 0-255 (DK-2) */
 typedef struct {
-    int   x, y;
-    float energy;
-    int   connections[8];
-    int   conn_count;
+    int     x, y;
+    uint8_t energy;
+    int     connections[8];
+    int     conn_count;
 } ConstellationNode;
 
-/* Pattern recognition result */
+/* Pattern recognition result — confidence 0-255 (DK-2) */
 typedef struct {
     PatternLayer layer;
-    float        confidence;
+    uint8_t      confidence;
     uint16_t     matched_id;
 } PatternResult;
 
-/* V6F: 6-float financial vector */
+/* V6F: 6-element integer financial vector (DK-2, fixed-point ×100) */
 typedef struct {
-    float v[6];
+    int32_t v[6];
 } V6F;
 
 /* Frame types for stream */
@@ -173,15 +173,15 @@ void          pattern_train(int x, int y, PatternLayer layer, uint16_t id);
 /* ===== constellation.c ===== */
 void  constellation_build(int cx, int cy, int radius);
 void  constellation_propagate(int steps);
-int   constellation_infer(float query_energy);
-void  constellation_update(int x, int y, float delta);
+int   constellation_infer(uint8_t query_energy);
+void  constellation_update(int x, int y, int16_t delta);
 
 /* ===== emotion.c ===== */
 void          emotion_init(EmotionVector *ev);
-void          emotion_update(EmotionVector *ev, EmotionIndex stimulus, float intensity);
-EmotionVector emotion_blend(EmotionVector a, EmotionVector b, float ratio);
+void          emotion_update(EmotionVector *ev, EmotionIndex stimulus, uint8_t intensity);
+EmotionVector emotion_blend(EmotionVector a, EmotionVector b, uint8_t ratio);
 EmotionIndex  emotion_dominant(EmotionVector *ev);
-float         emotion_to_energy(EmotionVector *ev);
+uint8_t       emotion_to_energy(EmotionVector *ev);
 
 /* ===== stream.c ===== */
 int    stream_write_keyframe(const uint8_t *data, size_t size);
@@ -199,19 +199,19 @@ void    elo_feed(const uint8_t *ctx, int ctx_len, uint8_t actual);
 uint8_t elo_get_trust(int layer);
 
 /* ===== compress.c ===== */
-int   compress_predicted_delta(const uint8_t *input, size_t input_size,
-                                uint8_t *output, size_t output_size);
-int   compress_decompress(const uint8_t *input, size_t input_size,
-                           uint8_t *output, size_t output_size);
-float compress_ratio(size_t original_size, size_t compressed_size);
+int      compress_predicted_delta(const uint8_t *input, size_t input_size,
+                                   uint8_t *output, size_t output_size);
+int      compress_decompress(const uint8_t *input, size_t input_size,
+                              uint8_t *output, size_t output_size);
+uint32_t compress_ratio(size_t original_size, size_t compressed_size);
 
 /* ===== v6f.c ===== */
-V6F   v6f_encode(float price, float open, float high, float low,
-                 float volume, float ts);
-void  v6f_decode(const V6F *f, float *price, float *open, float *high,
-                 float *low, float *volume, float *ts);
-float v6f_distance(const V6F *a, const V6F *b);
-float v6f_similarity(const V6F *a, const V6F *b);
+V6F      v6f_encode(int32_t price, int32_t open, int32_t high, int32_t low,
+                    int32_t volume, int32_t ts);
+void     v6f_decode(const V6F *f, int32_t *price, int32_t *open, int32_t *high,
+                    int32_t *low, int32_t *volume, int32_t *ts);
+uint32_t v6f_distance_sq(const V6F *a, const V6F *b);
+int32_t  v6f_similarity(const V6F *a, const V6F *b);
 
 /* ===== wh.c ===== */
 /* WHRecord type defined in cell.h */
@@ -253,7 +253,7 @@ void  multiverse_init(void);
 int   multiverse_spawn(int parent_universe, int branch_at_tick);
 void  multiverse_collapse(int universe_id);
 Cell  multiverse_get_cell(int universe_id, int x, int y);
-void  multiverse_probability_update(int universe_id, float evidence_weight);
+void  multiverse_probability_update(int universe_id, uint16_t evidence_weight);
 int   multiverse_active_count(void);
 
 /* ===== scheduler.c ===== */

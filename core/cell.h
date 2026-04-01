@@ -8,12 +8,12 @@
 #define MAX_CONSTELLATION_NODES 64
 #define MAX_PATTERN_CACHE       128
 
-/* Pattern training entry */
+/* Pattern training entry — confidence 0-255 (DK-2) */
 typedef struct {
     int          x, y;
     PatternLayer layer;
     uint16_t     id;
-    float        confidence;
+    uint8_t      confidence;
 } PatternEntry;
 
 /* Constellation graph */
@@ -23,12 +23,12 @@ typedef struct {
     int               center_x, center_y;
 } Constellation;
 
-/* BH summary */
+/* BH summary — energy_avg 0-255 (DK-2) */
 typedef struct {
     int      summary_id;
     uint64_t from_time;
     uint64_t to_time;
-    float    energy_avg;
+    uint8_t  energy_avg;
     int      record_count;
 } BHSummary;
 
@@ -71,12 +71,12 @@ typedef struct {
     bool    active;
 } Branch;
 
-/* Universe structure */
+/* Universe structure — probability 0-65535 (DK-2, 65535 = 1.0) */
 typedef struct {
-    int     id;
-    int     branch_id;
-    float   probability;
-    bool    active;
+    int      id;
+    int      branch_id;
+    uint16_t probability;
+    bool     active;
 } Universe;
 
 /* Process structure */
