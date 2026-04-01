@@ -209,6 +209,13 @@ EmotionVector emotion_blend(EmotionVector a, EmotionVector b, uint8_t ratio);
 EmotionIndex  emotion_dominant(EmotionVector *ev);
 uint8_t       emotion_to_energy(EmotionVector *ev);
 
+/* ===== emotion_detect.c — byte-pattern emotion detection ===== */
+void          emotion_detect_init(void);
+void          emotion_detect_train(const uint8_t *text, int text_len, EmotionIndex emotion);
+EmotionIndex  emotion_detect_infer(const uint8_t *text, int text_len);
+void          emotion_detect_scores(const uint8_t *text, int text_len, uint8_t *out_scores);
+int           emotion_detect_trained(EmotionIndex emotion);
+
 /* ===== chat.c — 2-stage text generation ===== */
 void  chat_init(void);
 void  chat_train(const char *text, int text_len);

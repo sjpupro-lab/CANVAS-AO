@@ -3,12 +3,12 @@ CFLAGS = -O2 -Wall -Iinclude -Icore
 LDFLAGS = -lm
 
 CORE_SRCS = core/canvas.c core/gate.c core/scan.c core/pattern.c \
-            core/constellation.c core/emotion.c core/stream.c \
-            core/compress.c core/elo.c core/v6f.c core/wh.c core/bh.c \
-            core/merge.c core/lane.c core/branch.c core/multiverse.c \
-            core/scheduler.c core/fs.c core/chat.c
+            core/constellation.c core/emotion.c core/emotion_detect.c \
+            core/stream.c core/compress.c core/elo.c core/v6f.c \
+            core/wh.c core/bh.c core/merge.c core/lane.c core/branch.c \
+            core/multiverse.c core/scheduler.c core/fs.c core/chat.c
 
-all: ao dating finance terminal craft benchmark test
+all: ao dating finance terminal craft train benchmark test
 
 ao: $(CORE_SRCS)
 	$(CC) $(CFLAGS) -shared -fPIC -o libao.so $(CORE_SRCS) $(LDFLAGS)
@@ -29,6 +29,10 @@ craft: $(CORE_SRCS) apps/craft/craft_main.c
 	@mkdir -p bin
 	$(CC) $(CFLAGS) -o bin/craft $(CORE_SRCS) apps/craft/craft_main.c $(LDFLAGS)
 
+train: $(CORE_SRCS) apps/train/train_main.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o bin/train $(CORE_SRCS) apps/train/train_main.c $(LDFLAGS)
+
 benchmark: $(CORE_SRCS) benchmark/bench_phaseB.c benchmark/bench_phase_d.c
 	@mkdir -p bin
 	$(CC) $(CFLAGS) -o bin/bench_phaseB $(CORE_SRCS) benchmark/bench_phaseB.c $(LDFLAGS)
@@ -46,4 +50,4 @@ test: $(CORE_SRCS) tests/test_core.c
 clean:
 	rm -f bin/* libao.so
 
-.PHONY: all ao dating finance terminal craft benchmark bench_enwik8 test clean
+.PHONY: all ao dating finance terminal craft train benchmark bench_enwik8 test clean

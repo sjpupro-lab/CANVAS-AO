@@ -39,6 +39,7 @@ void dating_init(void) {
     canvas_init();
     branch_system_init();
     multiverse_init();
+    emotion_detect_init();
     persona_load("ELO");
     emotion_init(&dating_emotion);
     wh_init();
@@ -80,11 +81,9 @@ const char *dating_respond(const char *input) {
     while (input[len]) len++;
 
     uint8_t intensity = (len > 20) ? 77 : 26;
-    EmotionIndex stim = EMOTION_JOY;
-    if (len > 0) {
-        uint8_t c = (uint8_t)input[0];
-        stim = (EmotionIndex)(c % 7);
-    }
+
+    /* Byte-pattern emotion detection (trained n-gram, replaces naive first-byte mod 7) */
+    EmotionIndex stim = emotion_detect_infer((const uint8_t *)input, len);
 
     /* === Multiverse branching: 3 candidate responses === */
     branch_system_init();

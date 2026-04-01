@@ -19,10 +19,10 @@
 
 /* ===== Word-level n-gram engine ===== */
 
-#define WORD_HASH_SIZE  4096
+#define WORD_HASH_SIZE  16384
 #define WORD_MAX_ORDER  4
-#define WORD_MAX_LEN    32
-#define WORD_VOCAB_SIZE 2048
+#define WORD_MAX_LEN    64
+#define WORD_VOCAB_SIZE 8192
 
 /* Word vocabulary: index → string mapping */
 static char    word_vocab[WORD_VOCAB_SIZE][WORD_MAX_LEN];

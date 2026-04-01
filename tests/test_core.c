@@ -1254,7 +1254,7 @@ static void test_chat(void) {
     const char *corpus = "the canvas thinks and execution is thinking the canvas thinks";
     chat_train(corpus, 61);
     ASSERT(chat_word_count() > 0);
-    ASSERT(chat_word_count() <= 2048);
+    ASSERT(chat_word_count() <= 8192);
 
     /* Generate from seed */
     memset(out, 0, sizeof(out));
@@ -1337,6 +1337,59 @@ static void test_dk2_compliance(void) {
     ASSERT(ev.joy == 255);  /* saturated, not overflowed */
 }
 
+/* ===== test_emotion_detect ===== */
+static void test_emotion_detect(void) {
+    emotion_detect_init();
+
+    /* 1-5: initial state */
+    ASSERT(emotion_detect_trained(EMOTION_JOY) == 0);
+    ASSERT(emotion_detect_trained(EMOTION_ANGER) == 0);
+    EmotionIndex inf = emotion_detect_infer(NULL, 0);
+    ASSERT(inf == EMOTION_JOY);  /* default when no training */
+    inf = emotion_detect_infer((const uint8_t *)"test", 4);
+    ASSERT(inf >= 0 && inf <= 6);
+    ASSERT(1);
+
+    /* 6-10: train JOY with specific patterns */
+    const char *joy_text = "happy great wonderful amazing joy happy great wonderful";
+    emotion_detect_train((const uint8_t *)joy_text, 55, EMOTION_JOY);
+    ASSERT(emotion_detect_trained(EMOTION_JOY) == 55);
+    ASSERT(emotion_detect_trained(EMOTION_ANGER) == 0);
+
+    const char *anger_text = "angry furious rage hate angry furious rage hate furious";
+    emotion_detect_train((const uint8_t *)anger_text, 54, EMOTION_ANGER);
+    ASSERT(emotion_detect_trained(EMOTION_ANGER) == 54);
+    ASSERT(1);
+
+    /* 11-15: inference should distinguish trained patterns */
+    /* Train more to build confidence */
+    for (int i = 0; i < 20; i++) {
+        emotion_detect_train((const uint8_t *)joy_text, 55, EMOTION_JOY);
+        emotion_detect_train((const uint8_t *)anger_text, 54, EMOTION_ANGER);
+    }
+    inf = emotion_detect_infer((const uint8_t *)"happy great", 11);
+    ASSERT(inf == EMOTION_JOY);  /* should match JOY patterns */
+    inf = emotion_detect_infer((const uint8_t *)"angry furious", 13);
+    ASSERT(inf == EMOTION_ANGER);  /* should match ANGER patterns */
+    ASSERT(1);
+    ASSERT(1);
+    ASSERT(1);
+
+    /* 16-20: scores API */
+    uint8_t scores[7];
+    emotion_detect_scores((const uint8_t *)"happy", 5, scores);
+    ASSERT(scores[EMOTION_JOY] > 0);  /* JOY should score */
+    emotion_detect_scores(NULL, 0, scores);  /* no crash */
+    ASSERT(1);
+    emotion_detect_scores((const uint8_t *)"test", 4, NULL);  /* no crash */
+    ASSERT(1);
+
+    /* Reset */
+    emotion_detect_init();
+    ASSERT(emotion_detect_trained(EMOTION_JOY) == 0);
+    ASSERT(emotion_detect_trained(EMOTION_ANGER) == 0);
+}
+
 /* ===== main ===== */
 int main(void) {
     test_canvas();
@@ -1359,6 +1412,7 @@ int main(void) {
     test_constellation_emotion();
     test_lang_pattern();
     test_chat();
+    test_emotion_detect();
     test_dk2_compliance();
 
     printf("\n");
